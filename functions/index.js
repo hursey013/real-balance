@@ -7,10 +7,6 @@ const functions = require("firebase-functions");
 const admin = require("firebase-admin");
 admin.initializeApp();
 
-// Init Realtime Database
-const db = admin.database();
-const ref = db.ref("/");
-
 // Init Express
 const express = require("express");
 const basicAuth = require("express-basic-auth");
@@ -28,8 +24,6 @@ const plaidClient = new plaid.Client({
   secret: functions.config().plaid.secret,
   env: plaid.environments.development
 });
-
-const checkLastUpdate = date => new Date(date) > Date.now() - 1000 * 60 * 5;
 
 const convertToCurrency = balances =>
   Object.keys(balances).forEach(key => {
@@ -56,15 +50,8 @@ const buildResponse = value => ({
   data: { value: Dinero({ amount: value }).toUnit() }
 });
 
-app.get("/", async (req, res) => {
-  // If last request was less than five minutes ago, send value from db
-  const snap = await ref.once("value");
-
-  if (checkLastUpdate(snap.val().lastUpdated)) {
-    return res.status(200).send(buildResponse(snap.val().value));
-  }
-
-  // ...otherwise, fetch data from Plaid API
+app.get("/api", async (req, res) => {
+  // Fetch data from Plaid API
   const data = await fetchAccounts(functions.config().plaid.items);
 
   // Flatten all accounts into single array
@@ -87,14 +74,9 @@ app.get("/", async (req, res) => {
     .subtract(Dinero({ amount: balances.credit }))
     .getAmount();
 
-  // Update db with timestamp and latest balance
-  ref.set({
-    lastUpdated: admin.database.ServerValue.TIMESTAMP,
-    value: balances.total
-  });
-
   // Return response
+  res.set("Cache-Control", "public, max-age=300, s-maxage=600");
   return res.status(200).send(buildResponse(balances.total));
 });
 
-exports.balance = functions.https.onRequest(app);
+exports.app = functions.https.onRequest(app);
