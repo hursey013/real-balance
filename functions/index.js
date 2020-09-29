@@ -63,7 +63,7 @@ app.get("/api", async (req, res) => {
       (acc[type] && Dinero({ amount: acc[type] })) ||
       Dinero({ amount: 0 })
     )
-      .add(Dinero({ amount: current * 100 }))
+      .add(Dinero({ amount: Math.round(current * 100) }))
       .getAmount();
 
     return acc;
