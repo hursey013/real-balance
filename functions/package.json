@@ -19,7 +19,8 @@
     "express-basic-auth": "^1.2.0",
     "firebase-admin": "^8.10.0",
     "firebase-functions": "^3.6.1",
-    "plaid": "^7.0.1"
+    "plaid": "^7.0.1",
+    "splitwise": "^1.0.0"
   },
   "devDependencies": {
     "eslint": "^5.12.0",

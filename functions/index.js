@@ -25,12 +25,20 @@ const plaidClient = new plaid.Client({
   env: plaid.environments.development
 });
 
+// Init Splitwise API
+const Splitwise = require("splitwise");
+const sw = Splitwise({
+  consumerKey: functions.config().splitwise.key,
+  consumerSecret: functions.config().splitwise.secret,
+  accessToken: functions.config().splitwise.token
+});
+
 const convertToCurrency = balances =>
   Object.keys(balances).forEach(key => {
     balances[key] = Dinero({ amount: balances[key] }).toFormat();
   });
 
-const fetchAccounts = async items => {
+const fetchPlaid = async items => {
   const results = [];
 
   for (const item of items) {
@@ -44,6 +52,12 @@ const fetchAccounts = async items => {
   return await Promise.all(results);
 };
 
+const fetchSplitwise = async () => {
+  const data = await sw.getFriends();
+
+  return data.reduce((acc, cur) => acc + cur.balance[0].amount || 0, 0);
+};
+
 const buildResponse = value => ({
   postfix: "Real balance",
   color: Dinero({ amount: value }).isNegative() ? "red" : "green",
@@ -52,10 +66,10 @@ const buildResponse = value => ({
 
 app.get("/api", async (req, res) => {
   // Fetch data from Plaid API
-  const data = await fetchAccounts(functions.config().plaid.items);
+  const plaid = await fetchPlaid(functions.config().plaid.items);
 
   // Flatten all accounts into single array
-  const accounts = data.reduce((acc, cur) => acc.concat(cur.accounts), []);
+  const accounts = plaid.reduce((acc, cur) => acc.concat(cur.accounts), []);
 
   // Increment balances based on account type
   const balances = accounts.reduce((acc, { balances: { current }, type }) => {
@@ -69,10 +83,20 @@ app.get("/api", async (req, res) => {
     return acc;
   }, {});
 
+  // Fetch data from Splitwise API
+  const splitwise = await fetchSplitwise();
+  balances.splitwise = Dinero({
+    amount: Math.round(splitwise * 100)
+  }).getAmount();
+
   // Subtract credit from depository balance and add result to object
   balances.total = Dinero({ amount: balances.depository })
     .subtract(Dinero({ amount: balances.credit }))
+    .add(Dinero({ amount: balances.splitwise }))
     .getAmount();
+
+  // Log balances object
+  functions.logger.info(balances);
 
   // Return response
   res.set("Cache-Control", "public, max-age=300, s-maxage=600");
