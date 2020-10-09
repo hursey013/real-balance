@@ -7,6 +7,10 @@ const functions = require("firebase-functions");
 const admin = require("firebase-admin");
 admin.initializeApp();
 
+// Init Realtime Database
+const db = admin.database();
+const ref = db.ref("/");
+
 // Init Express
 const express = require("express");
 const basicAuth = require("express-basic-auth");
@@ -58,16 +62,34 @@ const fetchSplitwise = async () => {
   return data.reduce((acc, cur) => acc + cur.balance[0].amount || 0, 0);
 };
 
-const buildResponse = value => ({
-  postfix: "Real balance",
-  color: Dinero({ amount: value }).isNegative() ? "red" : "green",
-  data: { value: Dinero({ amount: value }).toUnit() }
-});
+const buildResponse = value => {
+  // Retrieve paycheck amount from DB
+  const pay = ref.once("value").then(snapshot => snapshot.val().pay);
+  const balance = Dinero({ amount: value }).toUnit();
+
+  return {
+    postfix: "Real balance",
+    color: setColor(balance, pay),
+    data: { value: balance }
+  };
+};
+
+const setColor = (balance, pay) => {
+  // Change background colors based on different thresholds
+  if (balance >= pay * 0.5) {
+    return "green";
+  } else if (balance >= pay * 0.25) {
+    return "orange";
+  } else {
+    return "red";
+  }
+};
 
 app.get("/api", async (req, res) => {
   // Fetch data from Plaid API
+  let plaid;
   try {
-    const plaid = await fetchPlaid(functions.config().plaid.items);
+    plaid = await fetchPlaid(functions.config().plaid.items);
   } catch (error) {
     functions.logger.error(error);
     return res.sendStatus(500);
@@ -89,8 +111,9 @@ app.get("/api", async (req, res) => {
   }, {});
 
   // Fetch data from Splitwise API
+  let splitwise;
   try {
-    const splitwise = await fetchSplitwise();
+    splitwise = await fetchSplitwise();
   } catch (error) {
     functions.logger.error(error);
     return res.sendStatus(500);
