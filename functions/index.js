@@ -66,7 +66,12 @@ const buildResponse = value => ({
 
 app.get("/api", async (req, res) => {
   // Fetch data from Plaid API
-  const plaid = await fetchPlaid(functions.config().plaid.items);
+  try {
+    const plaid = await fetchPlaid(functions.config().plaid.items);
+  } catch (error) {
+    functions.logger.error(error);
+    return res.sendStatus(500);
+  }
 
   // Flatten all accounts into single array
   const accounts = plaid.reduce((acc, cur) => acc.concat(cur.accounts), []);
@@ -84,7 +89,13 @@ app.get("/api", async (req, res) => {
   }, {});
 
   // Fetch data from Splitwise API
-  const splitwise = await fetchSplitwise();
+  try {
+    const splitwise = await fetchSplitwise();
+  } catch (error) {
+    functions.logger.error(error);
+    return res.sendStatus(500);
+  }
+
   balances.splitwise = Dinero({
     amount: Math.round(splitwise * 100)
   }).getAmount();
