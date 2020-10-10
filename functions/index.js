@@ -59,12 +59,12 @@ const fetchPlaid = async items => {
 const fetchSplitwise = async () => {
   const data = await sw.getFriends();
 
-  return data.reduce((acc, cur) => acc + cur.balance[0].amount || 0, 0);
+  return data.reduce((acc, cur) => acc + Number(cur.balance[0].amount) || 0, 0);
 };
 
-const buildResponse = value => {
+const buildResponse = async value => {
   // Retrieve paycheck amount from DB
-  const pay = ref.once("value").then(snapshot => snapshot.val().pay);
+  const pay = await ref.once("value").then(snapshot => snapshot.val().pay);
   const balance = Dinero({ amount: value }).toUnit();
 
   return {
@@ -85,21 +85,12 @@ const setColor = (balance, pay) => {
   }
 };
 
-app.get("/api", async (req, res) => {
-  // Fetch data from Plaid API
-  let plaid;
-  try {
-    plaid = await fetchPlaid(functions.config().plaid.items);
-  } catch (error) {
-    functions.logger.error(error);
-    return res.sendStatus(500);
-  }
-
-  // Flatten all accounts into single array
+// Increment balances based on account type
+const addBalances = plaid => {
+  // Flatten all Plaid accounts into single array
   const accounts = plaid.reduce((acc, cur) => acc.concat(cur.accounts), []);
 
-  // Increment balances based on account type
-  const balances = accounts.reduce((acc, { balances: { current }, type }) => {
+  return accounts.reduce((acc, { balances: { current }, type }) => {
     acc[type] = (
       (acc[type] && Dinero({ amount: acc[type] })) ||
       Dinero({ amount: 0 })
@@ -109,32 +100,39 @@ app.get("/api", async (req, res) => {
 
     return acc;
   }, {});
+};
 
-  // Fetch data from Splitwise API
-  let splitwise;
+app.get("/api", async (req, res) => {
   try {
-    splitwise = await fetchSplitwise();
+    // Fetch data from APIs
+    const [plaid, splitwise] = await Promise.all([
+      fetchPlaid(functions.config().plaid.items),
+      fetchSplitwise()
+    ]);
+
+    // Increment balances based on account type
+    const balances = addBalances(plaid);
+
+    balances.splitwise = Dinero({
+      amount: Math.round(splitwise * 100)
+    }).getAmount();
+
+    // Subtract credit from depository balance and add result to object
+    balances.total = Dinero({ amount: balances.depository })
+      .subtract(Dinero({ amount: balances.credit }))
+      .add(Dinero({ amount: balances.splitwise }))
+      .getAmount();
+
+    // Log balances object
+    functions.logger.info(balances);
+
+    // Return response
+    res.set("Cache-Control", "public, max-age=300, s-maxage=600");
+    return res.status(200).send(buildResponse(balances.total));
   } catch (error) {
     functions.logger.error(error);
     return res.sendStatus(500);
   }
-
-  balances.splitwise = Dinero({
-    amount: Math.round(splitwise * 100)
-  }).getAmount();
-
-  // Subtract credit from depository balance and add result to object
-  balances.total = Dinero({ amount: balances.depository })
-    .subtract(Dinero({ amount: balances.credit }))
-    .add(Dinero({ amount: balances.splitwise }))
-    .getAmount();
-
-  // Log balances object
-  functions.logger.info(balances);
-
-  // Return response
-  res.set("Cache-Control", "public, max-age=300, s-maxage=600");
-  return res.status(200).send(buildResponse(balances.total));
 });
 
 exports.app = functions.https.onRequest(app);
