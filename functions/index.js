@@ -59,17 +59,20 @@ const fetchPlaid = async items => {
 const fetchSplitwise = async () => {
   const data = await sw.getFriends();
 
-  return data.reduce((acc, cur) => acc + Number(cur.balance[0].amount) || 0, 0);
+  return data.reduce(
+    (acc, cur) => acc + Number((cur.balance[0] && cur.balance[0].amount) || 0),
+    0
+  );
 };
 
 const buildResponse = async value => {
   // Retrieve paycheck amount from DB
-  const pay = await ref.once("value").then(snapshot => snapshot.val().pay);
+  const snapshot = await ref.once("value");
   const balance = Dinero({ amount: value }).toUnit();
 
   return {
     postfix: "Real balance",
-    color: setColor(balance, pay),
+    color: setColor(balance, snapshot.val().pay),
     data: { value: balance }
   };
 };
@@ -127,8 +130,10 @@ app.get("/api", async (req, res) => {
     functions.logger.info(balances);
 
     // Return response
+    const response = await buildResponse(balances.total);
+
     res.set("Cache-Control", "public, max-age=300, s-maxage=600");
-    return res.status(200).send(buildResponse(balances.total));
+    return res.status(200).send(response);
   } catch (error) {
     functions.logger.error(error);
     return res.sendStatus(500);
